@@ -26,6 +26,24 @@ import seaborn as sns
 # from pandas.tools.plotting import scatter_matrix
 
 
+def correlation_heatmap(df):
+    _, ax = plt.subplots(figsize=(14, 12))
+    colormap = sns.diverging_palette(220, 10, as_cmap=True)
+
+    _ = sns.heatmap(
+        df.corr(),
+        cmap=colormap,
+        square=True,
+        cbar_kws={'shrink': .9},
+        ax=ax,
+        annot=True,
+        linewidths=0.1, vmax=1.0, linecolor='white',
+        annot_kws={'fontsize': 6}
+    )
+
+    plt.title('Pearson Correlation of Features', y=1.05, size=15)
+
+
 def clean_data(train,test):
     combine = [train,test]
 
@@ -188,23 +206,6 @@ def explore_data(train, feat_sel_col, tar_col):
     pp.set(xticklabels=[])
 
     # ############### 7.6 Correlation heatmap of dataset
-    def correlation_heatmap(df):
-        _, ax = plt.subplots(figsize=(14, 12))
-        colormap = sns.diverging_palette(220, 10, as_cmap=True)
-
-        _ = sns.heatmap(
-            df.corr(),
-            cmap=colormap,
-            square=True,
-            cbar_kws={'shrink': .9},
-            ax=ax,
-            annot=True,
-            linewidths=0.1, vmax=1.0, linecolor='white',
-            annot_kws={'fontsize': 12}
-        )
-
-        plt.title('Pearson Correlation of Features', y=1.05, size=15)
-
     correlation_heatmap(train)
 
 
@@ -295,6 +296,9 @@ def try_model(train, tar_col, feat_bin_col):
     plt.title('Machine Learning Algorithm Accuracy Score \n')
     plt.xlabel('Accuracy Score (%)')
     plt.ylabel('Algorithm')
+
+    print MLA_predict.corr()
+    correlation_heatmap(MLA_predict)
 
 
 def tune_dt(train,feat_bin_col,tar_col):
@@ -406,6 +410,308 @@ def tune_dt(train,feat_bin_col,tar_col):
         rfe_tune_model.cv_results_['std_test_score'][tune_model.best_index_] * 100 * 3))
     print('-' * 10)
 
+    # ### visualize tree
+    # import graphviz
+    # dot_data = tree.export_graphviz(dtree, out_file=None,
+    #                                 feature_names=feat_bin_col, class_names=True,
+    #                                 filled=True, rounded=True)
+    # graph = graphviz.Source(dot_data)
+    # graph.render('test.gv', view=True)
+
+
+def validate_implement(train,feat_bin_col,tar_col,test):
+    # ############### 1
+    cv_split = model_selection.ShuffleSplit(n_splits=10, test_size=.3, train_size=.6,
+                                            random_state=0)
+    vote_est = [
+        # Ensemble Methods
+        ('ada', ensemble.AdaBoostClassifier()),
+        ('bc', ensemble.BaggingClassifier()),
+        ('etc', ensemble.ExtraTreesClassifier()),
+        ('gbc', ensemble.GradientBoostingClassifier()),
+        ('rfc', ensemble.RandomForestClassifier()),
+
+        # Gaussian Processes
+        ('gpc', gaussian_process.GaussianProcessClassifier()),
+
+        # GLM
+        ('lr', linear_model.LogisticRegressionCV()),
+
+        # Navies Bayes
+        ('bnb', naive_bayes.BernoulliNB()),
+        ('gnb', naive_bayes.GaussianNB()),
+
+        # Nearest Neighbor
+        ('knn', neighbors.KNeighborsClassifier()),
+
+        # SVM
+        ('svc', svm.SVC(probability=True)),
+
+        # xgboost
+        ('xgb', XGBClassifier())
+    ]
+
+    # Hard Vote or majority rules
+    vote_hard = ensemble.VotingClassifier(estimators=vote_est, voting='hard')
+    vote_hard_cv = model_selection.cross_validate(vote_hard, train[feat_bin_col], train[tar_col], cv=cv_split)
+    vote_hard.fit(train[feat_bin_col], train[tar_col])
+
+    print("Hard Voting Training w/bin score mean: {:.2f}".format(vote_hard_cv['train_score'].mean() * 100))
+    print("Hard Voting Test w/bin score mean: {:.2f}".format(vote_hard_cv['test_score'].mean() * 100))
+    print("Hard Voting Test w/bin score 3*std: +/- {:.2f}".format(vote_hard_cv['test_score'].std() * 100 * 3))
+    print('-' * 10)
+
+    # Soft Vote or weighted probabilities
+    vote_soft = ensemble.VotingClassifier(estimators=vote_est, voting='soft')
+    vote_soft_cv = model_selection.cross_validate(vote_soft, train[feat_bin_col], train[tar_col], cv=cv_split)
+    vote_soft.fit(train[feat_bin_col], train[tar_col])
+
+    print("Soft Voting Training w/bin score mean: {:.2f}".format(vote_soft_cv['train_score'].mean() * 100))
+    print("Soft Voting Test w/bin score mean: {:.2f}".format(vote_soft_cv['test_score'].mean() * 100))
+    print("Soft Voting Test w/bin score 3*std: +/- {:.2f}".format(vote_soft_cv['test_score'].std() * 100 * 3))
+    print('-' * 10)
+
+    # ################# 2
+    # Hyperparameter Tune with GridSearchCV: http://scikit-learn.org/stable/modules/generated/sklearn.model_selection.GridSearchCV.html
+    grid_n_estimator = [10, 50, 100, 300]
+    grid_ratio = [.1, .25, .5, .75, 1.0]
+    grid_learn = [.01, .03, .05, .1, .25]
+    grid_max_depth = [2, 4, 6, 8, 10, None]
+    grid_min_samples = [5, 10, .03, .05, .10]
+    grid_criterion = ['gini', 'entropy']
+    grid_bool = [True, False]
+    grid_seed = [0]
+
+    grid_param = [
+        [{
+            # AdaBoostClassifier
+            'n_estimators': grid_n_estimator,  # default=50
+            'learning_rate': grid_learn,  # default=1
+            # 'algorithm': ['SAMME', 'SAMME.R'], #default=’SAMME.R
+            'random_state': grid_seed
+        }],
+
+        [{
+            # BaggingClassifier
+            'n_estimators': grid_n_estimator,  # default=10
+            'max_samples': grid_ratio,  # default=1.0
+            'random_state': grid_seed
+        }],
+
+        [{
+            # ExtraTreesClassifier
+            'n_estimators': grid_n_estimator,  # default=10
+            'criterion': grid_criterion,  # default=”gini”
+            'max_depth': grid_max_depth,  # default=None
+            'random_state': grid_seed
+        }],
+
+        [{
+            # GradientBoostingClassifier
+            #  'loss': ['deviance', 'exponential'], #default=’deviance’
+            'learning_rate': [.05],# default=0.1 -- 12/31/17 set to reduce runtime
+            # -- The best parameter for GradientBoostingClassifier is {'learning_rate': 0.05, 'max_depth': 2, 'n_estimators': 300, 'random_state': 0} with a runtime of 264.45 seconds.
+            'n_estimators': [300],# default=100 -- 12/31/17 set to reduce runtime
+            # 'criterion': ['friedman_mse', 'mse', 'mae'], #default=”friedman_mse”
+            'max_depth': grid_max_depth,  # default=3
+            'random_state': grid_seed
+        }],
+
+        [{
+            # RandomForestClassifier
+            'n_estimators': grid_n_estimator,  # default=10
+            'criterion': grid_criterion,  # default=”gini”
+            'max_depth': grid_max_depth,  # default=None
+            'oob_score': [True],# default=False -- 12/31/17 set to reduce runtime -- The best parameter for RandomForestClassifier is {'criterion': 'entropy', 'max_depth': 6, 'n_estimators': 100, 'oob_score': True, 'random_state': 0} with a runtime of 146.35 seconds.
+            'random_state': grid_seed
+        }],
+
+        [{
+            # GaussianProcessClassifier
+            'max_iter_predict': grid_n_estimator,  # default: 100
+            'random_state': grid_seed
+        }],
+
+        [{
+            # LogisticRegressionCV
+            'fit_intercept': grid_bool,  # default: True
+            # 'penalty': ['l1','l2'],
+            'solver': ['newton-cg', 'lbfgs', 'liblinear', 'sag', 'saga'],  # default: lbfgs
+            'random_state': grid_seed
+        }],
+
+        [{
+            # BernoulliNB
+            'alpha': grid_ratio,  # default: 1.0
+        }],
+
+        # GaussianNB -
+        [{}],
+
+        [{
+            # KNeighborsClassifier
+            'n_neighbors': [1, 2, 3, 4, 5, 6, 7],  # default: 5
+            'weights': ['uniform', 'distance'],  # default = ‘uniform’
+            'algorithm': ['auto', 'ball_tree', 'kd_tree', 'brute']
+        }],
+
+        [{
+            # SVC
+            # 'kernel': ['linear', 'poly', 'rbf', 'sigmoid'],
+            'C': [1, 2, 3, 4, 5],  # default=1.0
+            'gamma': grid_ratio,  # edfault: auto
+            'decision_function_shape': ['ovo', 'ovr'],  # default:ovr
+            'probability': [True],
+            'random_state': grid_seed
+        }],
+
+        [{
+            # XGBClassifier
+            'learning_rate': grid_learn,  # default: .3
+            'max_depth': [1, 2, 4, 6, 8, 10],  # default 2
+            'n_estimators': grid_n_estimator,
+            'seed': grid_seed
+        }]
+    ]
+
+    start_total = time.perf_counter()
+    for clf, param in zip(vote_est, grid_param):
+        # print(clf[1]) #vote_est is a list of tuples, index 0 is the name and index 1 is the algorithm
+        # print(param)
+
+        start = time.perf_counter()
+        best_search = model_selection.GridSearchCV(estimator=clf[1], param_grid=param, cv=cv_split, scoring='roc_auc')
+        best_search.fit(train[feat_bin_col], train[tar_col])
+        run = time.perf_counter() - start
+
+        best_param = best_search.best_params_
+        print('The best parameter for {} is {} with a runtime of {:.2f} seconds.'.format(clf[1].__class__.__name__,
+                                                                                         best_param, run))
+        clf[1].set_params(**best_param)
+
+    run_total = time.perf_counter() - start_total
+    print('Total optimization time was {:.2f} minutes.'.format(run_total / 60))
+
+    print('-' * 10)
+
+    # ################### 3.
+    # Hard Vote or majority rules w/Tuned Hyperparameters
+    grid_hard = ensemble.VotingClassifier(estimators=vote_est, voting='hard')
+    grid_hard_cv = model_selection.cross_validate(grid_hard, train[feat_bin_col], train[tar_col], cv=cv_split)
+    grid_hard.fit(train[feat_bin_col], train[tar_col])
+
+    print("Hard Voting w/Tuned Hyperparameters Training w/bin score mean: {:.2f}".format(
+        grid_hard_cv['train_score'].mean() * 100))
+    print("Hard Voting w/Tuned Hyperparameters Test w/bin score mean: {:.2f}".format(
+        grid_hard_cv['test_score'].mean() * 100))
+    print("Hard Voting w/Tuned Hyperparameters Test w/bin score 3*std: +/- {:.2f}".format(
+        grid_hard_cv['test_score'].std() * 100 * 3))
+    print('-' * 10)
+
+    # Soft Vote or weighted probabilities w/Tuned Hyperparameters
+    grid_soft = ensemble.VotingClassifier(estimators=vote_est, voting='soft')
+    grid_soft_cv = model_selection.cross_validate(grid_soft, train[feat_bin_col], train[tar_col], cv=cv_split)
+    grid_soft.fit(train[feat_bin_col], train[tar_col])
+
+    print("Soft Voting w/Tuned Hyperparameters Training w/bin score mean: {:.2f}".format(
+        grid_soft_cv['train_score'].mean() * 100))
+    print("Soft Voting w/Tuned Hyperparameters Test w/bin score mean: {:.2f}".format(
+        grid_soft_cv['test_score'].mean() * 100))
+    print("Soft Voting w/Tuned Hyperparameters Test w/bin score 3*std: +/- {:.2f}".format(
+        grid_soft_cv['test_score'].std() * 100 * 3))
+    print('-' * 10)
+
+    # 12/31/17 tuned with data1_x_bin
+    # The best parameter for AdaBoostClassifier is {'learning_rate': 0.1, 'n_estimators': 300, 'random_state': 0} with a runtime of 33.39 seconds.
+    # The best parameter for BaggingClassifier is {'max_samples': 0.25, 'n_estimators': 300, 'random_state': 0} with a runtime of 30.28 seconds.
+    # The best parameter for ExtraTreesClassifier is {'criterion': 'entropy', 'max_depth': 6, 'n_estimators': 100, 'random_state': 0} with a runtime of 64.76 seconds.
+    # The best parameter for GradientBoostingClassifier is {'learning_rate': 0.05, 'max_depth': 2, 'n_estimators': 300, 'random_state': 0} with a runtime of 34.35 seconds.
+    # The best parameter for RandomForestClassifier is {'criterion': 'entropy', 'max_depth': 6, 'n_estimators': 100, 'oob_score': True, 'random_state': 0} with a runtime of 76.32 seconds.
+    # The best parameter for GaussianProcessClassifier is {'max_iter_predict': 10, 'random_state': 0} with a runtime of 6.01 seconds.
+    # The best parameter for LogisticRegressionCV is {'fit_intercept': True, 'random_state': 0, 'solver': 'liblinear'} with a runtime of 8.04 seconds.
+    # The best parameter for BernoulliNB is {'alpha': 0.1} with a runtime of 0.19 seconds.
+    # The best parameter for GaussianNB is {} with a runtime of 0.04 seconds.
+    # The best parameter for KNeighborsClassifier is {'algorithm': 'brute', 'n_neighbors': 7, 'weights': 'uniform'} with a runtime of 4.84 seconds.
+    # The best parameter for SVC is {'C': 2, 'decision_function_shape': 'ovo', 'gamma': 0.1, 'probability': True, 'random_state': 0} with a runtime of 29.39 seconds.
+    # The best parameter for XGBClassifier is {'learning_rate': 0.01, 'max_depth': 4, 'n_estimators': 300, 'seed': 0} with a runtime of 46.23 seconds.
+    # Total optimization time was 5.56 minutes.
+
+
+    # ################# 4.
+    # prepare data for modeling
+    test=[]
+    print(test.info())
+    print("-" * 10)
+    # data_val.sample(10)
+
+    # handmade decision tree - submission score = 0.77990
+    # test['Survived'] = mytree(test).astype(int)
+
+    # decision tree w/full dataset modeling submission score: defaults= 0.76555, tuned= 0.77990
+    # submit_dt = tree.DecisionTreeClassifier()
+    # submit_dt = model_selection.GridSearchCV(tree.DecisionTreeClassifier(), param_grid=param_grid, scoring = 'roc_auc', cv = cv_split)
+    # submit_dt.fit(data1[data1_x_bin], data1[Target])
+    # print('Best Parameters: ', submit_dt.best_params_) #Best Parameters:  {'criterion': 'gini', 'max_depth': 4, 'random_state': 0}
+    # data_val['Survived'] = submit_dt.predict(data_val[data1_x_bin])
+
+    # bagging w/full dataset modeling submission score: defaults= 0.75119, tuned= 0.77990
+    # submit_bc = ensemble.BaggingClassifier()
+    # submit_bc = model_selection.GridSearchCV(ensemble.BaggingClassifier(), param_grid= {'n_estimators':grid_n_estimator, 'max_samples': grid_ratio, 'oob_score': grid_bool, 'random_state': grid_seed}, scoring = 'roc_auc', cv = cv_split)
+    # submit_bc.fit(data1[data1_x_bin], data1[Target])
+    # print('Best Parameters: ', submit_bc.best_params_) #Best Parameters:  {'max_samples': 0.25, 'n_estimators': 500, 'oob_score': True, 'random_state': 0}
+    # data_val['Survived'] = submit_bc.predict(data_val[data1_x_bin])
+
+    # extra tree w/full dataset modeling submission score: defaults= 0.76555, tuned= 0.77990
+    # submit_etc = ensemble.ExtraTreesClassifier()
+    # submit_etc = model_selection.GridSearchCV(ensemble.ExtraTreesClassifier(), param_grid={'n_estimators': grid_n_estimator, 'criterion': grid_criterion, 'max_depth': grid_max_depth, 'random_state': grid_seed}, scoring = 'roc_auc', cv = cv_split)
+    # submit_etc.fit(data1[data1_x_bin], data1[Target])
+    # print('Best Parameters: ', submit_etc.best_params_) #Best Parameters:  {'criterion': 'entropy', 'max_depth': 6, 'n_estimators': 100, 'random_state': 0}
+    # data_val['Survived'] = submit_etc.predict(data_val[data1_x_bin])
+
+    # random foreset w/full dataset modeling submission score: defaults= 0.71291, tuned= 0.73205
+    # submit_rfc = ensemble.RandomForestClassifier()
+    # submit_rfc = model_selection.GridSearchCV(ensemble.RandomForestClassifier(), param_grid={'n_estimators': grid_n_estimator, 'criterion': grid_criterion, 'max_depth': grid_max_depth, 'random_state': grid_seed}, scoring = 'roc_auc', cv = cv_split)
+    # submit_rfc.fit(data1[data1_x_bin], data1[Target])
+    # print('Best Parameters: ', submit_rfc.best_params_) #Best Parameters:  {'criterion': 'entropy', 'max_depth': 6, 'n_estimators': 100, 'random_state': 0}
+    # data_val['Survived'] = submit_rfc.predict(data_val[data1_x_bin])
+
+    # ada boosting w/full dataset modeling submission score: defaults= 0.74162, tuned= 0.75119
+    # submit_abc = ensemble.AdaBoostClassifier()
+    # submit_abc = model_selection.GridSearchCV(ensemble.AdaBoostClassifier(), param_grid={'n_estimators': grid_n_estimator, 'learning_rate': grid_ratio, 'algorithm': ['SAMME', 'SAMME.R'], 'random_state': grid_seed}, scoring = 'roc_auc', cv = cv_split)
+    # submit_abc.fit(data1[data1_x_bin], data1[Target])
+    # print('Best Parameters: ', submit_abc.best_params_) #Best Parameters:  {'algorithm': 'SAMME.R', 'learning_rate': 0.1, 'n_estimators': 300, 'random_state': 0}
+    # data_val['Survived'] = submit_abc.predict(data_val[data1_x_bin])
+
+    # gradient boosting w/full dataset modeling submission score: defaults= 0.75119, tuned= 0.77033
+    # submit_gbc = ensemble.GradientBoostingClassifier()
+    # submit_gbc = model_selection.GridSearchCV(ensemble.GradientBoostingClassifier(), param_grid={'learning_rate': grid_ratio, 'n_estimators': grid_n_estimator, 'max_depth': grid_max_depth, 'random_state':grid_seed}, scoring = 'roc_auc', cv = cv_split)
+    # submit_gbc.fit(data1[data1_x_bin], data1[Target])
+    # print('Best Parameters: ', submit_gbc.best_params_) #Best Parameters:  {'learning_rate': 0.25, 'max_depth': 2, 'n_estimators': 50, 'random_state': 0}
+    # data_val['Survived'] = submit_gbc.predict(data_val[data1_x_bin])
+
+    # extreme boosting w/full dataset modeling submission score: defaults= 0.73684, tuned= 0.77990
+    # submit_xgb = XGBClassifier()
+    # submit_xgb = model_selection.GridSearchCV(XGBClassifier(), param_grid= {'learning_rate': grid_learn, 'max_depth': [0,2,4,6,8,10], 'n_estimators': grid_n_estimator, 'seed': grid_seed}, scoring = 'roc_auc', cv = cv_split)
+    # submit_xgb.fit(data1[data1_x_bin], data1[Target])
+    # print('Best Parameters: ', submit_xgb.best_params_) #Best Parameters:  {'learning_rate': 0.01, 'max_depth': 4, 'n_estimators': 300, 'seed': 0}
+    # data_val['Survived'] = submit_xgb.predict(data_val[data1_x_bin])
+
+    # hard voting classifier w/full dataset modeling submission score: defaults= 0.75598, tuned = 0.77990
+    # data_val['Survived'] = vote_hard.predict(data_val[data1_x_bin])
+    test['Survived'] = grid_hard.predict(test[feat_bin_col])
+
+    # soft voting classifier w/full dataset modeling submission score: defaults= 0.73684, tuned = 0.74162
+    # data_val['Survived'] = vote_soft.predict(data_val[data1_x_bin])
+    # data_val['Survived'] = grid_soft.predict(data_val[data1_x_bin])
+
+    # submit file
+    submit = test[['PassengerId', 'Survived']]
+    submit.to_csv("../working/submit.csv", index=False)
+
+    print('Validation Data Distribution: \n', test['Survived'].value_counts(normalize=True))
+    submit.sample(10)
+
+
 
 if __name__ == '__main__':
     train = pd.read_csv('../data/train.csv')
@@ -486,6 +792,9 @@ if __name__ == '__main__':
     # try_model(train,tar_col,feat_bin_col)
 
     # ##################### 9. Tune Model with Hyper-Parameters
-    tune_dt(train,feat_bin_col,tar_col)
+    # tune_dt(train,feat_bin_col,tar_col)
+
+    # ##################### 10. Voting model
+    # validate_implement(train,feat_bin_col,tar_col)
 
     plt.show()
