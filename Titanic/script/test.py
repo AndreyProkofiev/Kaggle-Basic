@@ -46,7 +46,8 @@ c[0] = 10
 print c
 print '8'*20
 print data
-
+print data.columns.values
+print data.corr()
 
 #########################
 df = pd.DataFrame([
