@@ -20,6 +20,12 @@
 
   http://blog.csdn.net/chloezhao/article/details/53484471
 
+  http://pbpython.com/categorical-encoding.html  Approach #3 - One Hot Encoding
+
+  > Label encoding has the advantage that it is straightforward but it has the disadvantage that the numeric values can be “misinterpreted” by the algorithms. For example, the value of 0 is obviously less than the value of 4 but does that really correspond to the data set in real life? Does a wagon have “4X” more weight in our calculation than the convertible? In this example, I don’t think so.
+  >
+  > A common alternative approach is called one hot encoding (but also goes by several different names shown below).
+
 - [编码和bias项](https://www.cnblogs.com/lianyingteng/p/7792693.html)：
 
   我们使用one-hot编码时，通常我们的模型不加bias项 或者 加上bias项然后使用L2正则化手段去约束参数；当我们使用哑变量编码时，通常我们的模型都会加bias项，因为不加bias项会导致固有属性的丢失。
@@ -46,8 +52,49 @@
 
      name
 
-  ​
+- [Category Encoding](http://pbpython.com/categorical-encoding.html)
 
+  1. Find and Replace
+
+     ```python
+     cleanup_nums = {"num_doors":{"four": 4, "two": 2}}
+     obj_df.replace(cleanup_nums, inplace=True)
+     ```
+
+  2. Label Encoding
+
+     ```python
+     obj_df["body_style"] = obj_df["body_style"].astype('category')
+     obj_df["body_style_cat"] = obj_df["body_style"].cat.codes
+     ```
+
+  3. One Hot Encoding
+
+     ```python
+     tar = pd.get_dummies(obj_df, columns=["drive_wheels"])
+     ```
+
+  4. Custom Binary Encoding
+
+     ```python
+     obj_df["OHC_Code"] = np.where(obj_df["engine_type"].str.contains("ohc"), 1, other=0)
+     ```
+
+     ![image](http://pbpython.com/images/np-where-2.png)
+
+  5. Scikit-Learn
+
+     ```python
+     from sklearn.preprocessing import LabelEncoder
+     lb_make = LabelEncoder()
+     obj_df["make_code"] = lb_make.fit_transform(obj_df["make"])
+
+     from sklearn.preprocessing import LabelBinarizer
+     lb_style = LabelBinarizer()
+     lb_results = lb_style.fit_transform(obj_df["body_style"])
+     ```
+
+     ​
 
 
 # 3.Models
